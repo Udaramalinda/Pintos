@@ -47,17 +47,6 @@ syscall_handler(struct intr_frame *f UNUSED) {
         break;
     }
 
-    case SYS_WAIT: {
-        int pid;
-
-        if (!load_mem(f->esp + 4, &pid, sizeof(int))) {
-            exit(-1);
-        }
-
-        f->eax = wait(pid);
-        break;
-    }
-
     case SYS_HALT: {
         shutdown_power_off();
         break;
@@ -188,10 +177,6 @@ int exit(int status) {
     printf("%s: exit(%d)\n", current_thread->name, status);
 
     thread_exit();
-}
-
-int wait(int pid) {
-    return process_wait(pid);
 }
 
 int write(int fd, const void *buffer, unsigned size) {

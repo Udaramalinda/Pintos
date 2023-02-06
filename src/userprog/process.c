@@ -20,7 +20,6 @@
 
 static thread_func start_process NO_RETURN;
 static bool load(const char *cmdline, void (**eip)(void), void **esp);
-struct child_tcb *get_child_tcb(tid_t tid, struct list *child_list);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -136,47 +135,16 @@ start_process(void *file_name_) {
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-int process_wait(tid_t child_tid) {
-    struct child_tcb *child_tcb = get_child_tcb(child_tid, &thread_current()->child_list);
-    if (child_tcb == NULL && child_tcb->is_waited) {
-        return -1;
+int process_wait(tid_t child_tid UNUSED) {
+    for (int i = 0; i < 500000000; i++) {
     }
-
-    child_tcb->is_waited = true;
-
-    if (child_tcb->status == THREAD_ALIVE) {
-        sema_down(&child_tcb->child_thread->wait_sema);
-    }
-
-    int status = child_tcb->status;
-    return status;
+    return 0;
 }
 
 /* Free the current process's resources. */
 void process_exit(void) {
     struct thread *cur = thread_current();
     uint32_t *pd;
-
-    if (cur->parent != NULL) {
-        struct child_tcb *child_tcb = get_child_tcb(cur->tid, &cur->parent->child_list);
-        if (child_tcb->status == THREAD_ALIVE) {
-            child_tcb->status = THREAD_KILLED;
-            child_tcb->exit_status = -1;
-        }
-    }
-
-    while (!list_empty(&cur->child_list)) {
-        struct list_elem *e = list_pop_front(&cur->child_list);
-        struct child_tcb *child_tcb = list_entry(e, struct child_tcb, elem);
-        free(child_tcb);
-    }
-
-    sema_up(&cur->wait_sema);
-    cur->parent = NULL;
-
-    file_close(cur->exec_file);
-
-    /* Close all open files*/
 
     /* Destroy the current process's page directory and switch back
        to the kernel-only page directory. */
@@ -510,17 +478,4 @@ install_page(void *upage, void *kpage, bool writable) {
     /* Verify that there's not already a page at that virtual
        address, then map our page there. */
     return (pagedir_get_page(t->pagedir, upage) == NULL && pagedir_set_page(t->pagedir, upage, kpage, writable));
-}
-
-struct child_tcb *get_child_tcb(tid_t tid, struct list *child_list) {
-    struct list_elem *e;
-    struct child_tcb *child;
-
-    for (e = list_begin(child_list); e != list_end(child_list); e = list_next(e)) {
-        child = list_entry(e, struct child_tcb, elem);
-        if (child->parent_tid == tid) {
-            return child;
-        }
-    }
-    return NULL;
 }

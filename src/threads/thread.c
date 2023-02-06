@@ -1,6 +1,4 @@
 #include "threads/thread.h"
-#include "filesys/file.h"
-#include "filesys/filesys.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
@@ -421,11 +419,6 @@ init_thread(struct thread *t, const char *name, int priority) {
 
     memset(t, 0, sizeof *t);
 
-    sema_init(&t->exec_sema, 0);
-    sema_init(&t->wait_sema, 0);
-    list_init(&t->child_list);
-    t->parent = NULL;
-
     list_init(&t->open_file_list);
     t->open_file_count = 1;
 
@@ -541,16 +534,6 @@ allocate_tid(void) {
     lock_release(&tid_lock);
 
     return tid;
-}
-
-void close_open_files(struct thread *t) {
-    struct list_elem *e;
-    struct file *f;
-
-    for (e = list_begin(&t->open_file_list); e != list_end(&t->open_file_list); e = list_next(e)) {
-        f = list_entry(e, struct file, elem);
-        file_close(f);
-    }
 }
 
 /* Offset of `stack' member within `struct thread'.
