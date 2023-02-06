@@ -13,6 +13,12 @@ enum thread_status {
     THREAD_DYING    /* About to be destroyed. */
 };
 
+/* Child thread status. */
+#define THREAD_ALIVE 2
+#define THREAD_KILLED 0
+#define THREAD_EXITED 1
+#define INITIAL_EXIT_STATUS -500
+
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
@@ -91,6 +97,20 @@ struct thread {
     /* Shared between thread.c and synch.c. */
     struct list_elem elem; /* List element. */
 
+    /* The per process open file table is generally for each process but in pintos we are
+    allowed to treat a thread as a process. Furthermore the open file table is
+    implemented as a linked list here */
+    struct list open_file_list; /* List of open files */
+    int open_file_count;        /* Number of open files */
+
+    struct thread *parent;  /* Parent thread */
+    struct list child_list; /* List of child threads */
+
+    struct semaphore *wait_sema; /* Semaphore for wait thread */
+    struct semaphore *exec_sema; /* Semaphore for exec thread */
+
+    struct file *exec_file; /* Executable file that is being executed */
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir; /* Page directory. */
@@ -104,6 +124,16 @@ struct thread {
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+
+struct child_tcb {
+    struct list_elem elem;       /* List element */
+    struct thread *child_thread; /* Child thread */
+    tid_t child_tid;             /* Child thread id */
+    int status;                  /* Child thread status */
+    int exit_status;             /* Child thread exit status */
+    bool is_loaded;              /* Child thread load status */
+    bool is_waited;              /* Child thread wait status */
+};
 
 void thread_init(void);
 void thread_start(void);

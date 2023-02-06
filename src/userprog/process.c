@@ -20,12 +20,14 @@
 
 static thread_func start_process NO_RETURN;
 static bool load(const char *cmdline, void (**eip)(void), void **esp);
+struct child_tcb *get_child_tcb(tid_t tid, struct list *child_list);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t process_execute(const char *file_name) {
+    // printf("process_execute\n");
     char *fn_copy;
     tid_t tid;
 
@@ -40,9 +42,10 @@ tid_t process_execute(const char *file_name) {
     char *file_name2 = malloc(strlen(file_name) + 1);
     strlcpy(file_name2, file_name, strlen(file_name) + 1);
     char *first_token = strtok_r(file_name, " ", &save_ptr);
+    // printf("first_token: %s\n", first_token);
     /* Create a new thread to execute FILE_NAME. */
     tid = thread_create(first_token, PRI_DEFAULT, start_process, fn_copy);
-
+    // printf("tid: %d\n", tid);
     free(file_name2);
     if (tid == TID_ERROR)
         palloc_free_page(fn_copy);
@@ -53,9 +56,21 @@ tid_t process_execute(const char *file_name) {
    running. */
 static void
 start_process(void *file_name_) {
+    // printf("start_process\n");
     char *file_name = file_name_;
     struct intr_frame if_;
     bool success;
+
+    char *args[40];
+
+    char *save_ptr;
+    int argc = 0;
+
+    for (char *token = strtok_r(file_name, " ", &save_ptr); token != NULL;
+         token = strtok_r(NULL, " ", &save_ptr)) {
+        args[argc] = token;
+        argc++;
+    }
 
     /* Initialize interrupt frame and load executable. */
     memset(&if_, 0, sizeof if_);
@@ -63,6 +78,36 @@ start_process(void *file_name_) {
     if_.cs = SEL_UCSEG;
     if_.eflags = FLAG_IF | FLAG_MBS;
     success = load(file_name, &if_.eip, &if_.esp);
+    // printf("success: %d\n", success);
+    if (success) {
+        char *argv[argc];
+
+        for (int i = argc - 1; i >= 0; i--) {
+            if_.esp -= strlen(args[i]) + 1;
+            argv[i] = if_.esp;
+            memcpy(if_.esp, args[i], strlen(args[i]) + 1);
+        }
+
+        if_.esp -= (size_t)if_.esp % 4;
+        if_.esp -= 4;
+        *(int *)if_.esp = 0;
+
+        for (int i = argc - 1; i >= 0; i--) {
+            if_.esp -= 4;
+            *(char **)if_.esp = argv[i];
+        }
+
+        if_.esp -= 4;
+        *(char **)if_.esp = if_.esp + 4;
+
+        if_.esp -= 4;
+        *(int *)if_.esp = argc;
+
+        if_.esp -= 4;
+        *(int *)if_.esp = 0;
+
+        // hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
+    }
 
     /* If load failed, quit. */
     palloc_free_page(file_name);
@@ -91,14 +136,47 @@ start_process(void *file_name_) {
 
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
-int process_wait(tid_t child_tid UNUSED) {
-    return -1;
+int process_wait(tid_t child_tid) {
+    struct child_tcb *child_tcb = get_child_tcb(child_tid, &thread_current()->child_list);
+    if (child_tcb == NULL && child_tcb->is_waited) {
+        return -1;
+    }
+
+    child_tcb->is_waited = true;
+
+    if (child_tcb->status == THREAD_ALIVE) {
+        sema_down(&child_tcb->child_thread->wait_sema);
+    }
+
+    int status = child_tcb->status;
+    return status;
 }
 
 /* Free the current process's resources. */
 void process_exit(void) {
     struct thread *cur = thread_current();
     uint32_t *pd;
+
+    if (cur->parent != NULL) {
+        struct child_tcb *child_tcb = get_child_tcb(cur->tid, &cur->parent->child_list);
+        if (child_tcb->status == THREAD_ALIVE) {
+            child_tcb->status = THREAD_KILLED;
+            child_tcb->exit_status = -1;
+        }
+    }
+
+    while (!list_empty(&cur->child_list)) {
+        struct list_elem *e = list_pop_front(&cur->child_list);
+        struct child_tcb *child_tcb = list_entry(e, struct child_tcb, elem);
+        free(child_tcb);
+    }
+
+    sema_up(&cur->wait_sema);
+    cur->parent = NULL;
+
+    file_close(cur->exec_file);
+
+    /* Close all open files*/
 
     /* Destroy the current process's page directory and switch back
        to the kernel-only page directory. */
@@ -409,7 +487,7 @@ setup_stack(void **esp) {
     if (kpage != NULL) {
         success = install_page(((uint8_t *)PHYS_BASE) - PGSIZE, kpage, true);
         if (success)
-            *esp = PHYS_BASE;
+            *esp = PHYS_BASE - 12;
         else
             palloc_free_page(kpage);
     }
@@ -432,4 +510,17 @@ install_page(void *upage, void *kpage, bool writable) {
     /* Verify that there's not already a page at that virtual
        address, then map our page there. */
     return (pagedir_get_page(t->pagedir, upage) == NULL && pagedir_set_page(t->pagedir, upage, kpage, writable));
+}
+
+struct child_tcb *get_child_tcb(tid_t tid, struct list *child_list) {
+    struct list_elem *e;
+    struct child_tcb *child;
+
+    for (e = list_begin(child_list); e != list_end(child_list); e = list_next(e)) {
+        child = list_entry(e, struct child_tcb, elem);
+        if (child->parent_tid == tid) {
+            return child;
+        }
+    }
+    return NULL;
 }
